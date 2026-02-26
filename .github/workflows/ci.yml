@@ -16,8 +16,12 @@ jobs:
         uses: actions/checkout@v3
 
       - name: List files (debug)
-        run: dir
-        shell: cmd
+        shell: powershell
+        run: |
+          Write-Host "Current directory:"
+          Get-Location
+          Write-Host "Files in repo:"
+          Get-ChildItem
 
       # ===============================
       # LOGIN DOCKER HUB
@@ -29,31 +33,44 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # ===============================
-      # BUILD IMAGE (CMD SHELL)
+      # BUILD IMAGE (POWERSHELL FIXED)
       # ===============================
       - name: Build Docker image
-        shell: cmd
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        shell: powershell
         run: |
-          echo Building image...
-          docker build -t %DOCKERHUB_USERNAME%/mon-site-flask:latest .
-          docker tag %DOCKERHUB_USERNAME%/mon-site-flask:latest %DOCKERHUB_USERNAME%/mon-site-flask:%GITHUB_SHA%
+          $USERNAME = "${{ secrets.DOCKERHUB_USERNAME }}"
+          $IMAGE_LATEST = "$USERNAME/mon-site-flask:latest"
+          $IMAGE_SHA = "$USERNAME/mon-site-flask:${{ github.sha }}"
+
+          Write-Host "Building image: $IMAGE_LATEST"
+
+          # Build en précisant le Dockerfile
+          docker build -f Dockerfile -t $IMAGE_LATEST .
+
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "❌ Build failed"
+              exit 1
+          }
+
+          docker tag $IMAGE_LATEST $IMAGE_SHA
 
       # ===============================
-      # PUSH IMAGE (CMD SHELL)
+      # PUSH IMAGE
       # ===============================
       - name: Push Docker image
-        shell: cmd
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        shell: powershell
         run: |
-          echo Pushing image...
-          docker push %DOCKERHUB_USERNAME%/mon-site-flask:latest
-          docker push %DOCKERHUB_USERNAME%/mon-site-flask:%GITHUB_SHA%
+          $USERNAME = "${{ secrets.DOCKERHUB_USERNAME }}"
+          $IMAGE_LATEST = "$USERNAME/mon-site-flask:latest"
+          $IMAGE_SHA = "$USERNAME/mon-site-flask:${{ github.sha }}"
+
+          Write-Host "Pushing images..."
+
+          docker push $IMAGE_LATEST
+          docker push $IMAGE_SHA
 
       # ===============================
-      # DEPLOY LOCAL WINDOWS (POWERSHELL)
+      # DEPLOY LOCAL WINDOWS
       # ===============================
       - name: Deploy locally on Windows
         shell: powershell
