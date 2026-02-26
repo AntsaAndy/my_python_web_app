@@ -9,6 +9,9 @@ jobs:
     runs-on: self-hosted
 
     steps:
+      # ===============================
+      # CHECKOUT
+      # ===============================
       - name: Checkout repository
         uses: actions/checkout@v3
 
@@ -16,83 +19,99 @@ jobs:
         run: dir
         shell: cmd
 
-      - name: Build Docker image
-        run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:latest .
-          docker tag ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:latest ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:${{ github.sha }}
-
+      # ===============================
+      # LOGIN DOCKER HUB
+      # ===============================
       - name: Login to Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Push Docker image
+      # ===============================
+      # BUILD IMAGE (CMD SHELL)
+      # ===============================
+      - name: Build Docker image
+        shell: cmd
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:latest
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/mon-site-flask:${{ github.sha }}
+          echo Building image...
+          docker build -t %DOCKERHUB_USERNAME%/mon-site-flask:latest .
+          docker tag %DOCKERHUB_USERNAME%/mon-site-flask:latest %DOCKERHUB_USERNAME%/mon-site-flask:%GITHUB_SHA%
 
-      - name: Deploy locally on Windows
+      # ===============================
+      # PUSH IMAGE (CMD SHELL)
+      # ===============================
+      - name: Push Docker image
+        shell: cmd
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          Write-Host "Début du déploiement local..."
-          
+          echo Pushing image...
+          docker push %DOCKERHUB_USERNAME%/mon-site-flask:latest
+          docker push %DOCKERHUB_USERNAME%/mon-site-flask:%GITHUB_SHA%
+
+      # ===============================
+      # DEPLOY LOCAL WINDOWS (POWERSHELL)
+      # ===============================
+      - name: Deploy locally on Windows
+        shell: powershell
+        run: |
+          Write-Host "===== DEPLOYMENT START ====="
+
           $DOCKERHUB_USERNAME = "${{ secrets.DOCKERHUB_USERNAME }}"
           $IMAGE_NAME = "mon-site-flask"
           $TAG = "latest"
-          $FULL_IMAGE = "${DOCKERHUB_USERNAME}/${IMAGE_NAME}:${TAG}"
+          $FULL_IMAGE = "$DOCKERHUB_USERNAME/$IMAGE_NAME`:$TAG"
           $CONTAINER_NAME = "flask-app"
-          
+
           Write-Host "Image à déployer: $FULL_IMAGE"
-          
+
           # Pull latest image
           docker pull $FULL_IMAGE
-          
-          # Vérifier si le conteneur existe et le supprimer proprement
-          Write-Host "Nettoyage de l'ancien conteneur..."
+
+          # Vérifier si le conteneur existe
           $EXISTING_CONTAINER = docker ps -a --filter "name=$CONTAINER_NAME" --format "{{.Names}}"
-          
+
           if ($EXISTING_CONTAINER -eq $CONTAINER_NAME) {
-              Write-Host "Conteneur existant trouvé, arrêt et suppression..."
+              Write-Host "Ancien conteneur trouvé, suppression..."
               docker stop $CONTAINER_NAME
               docker rm $CONTAINER_NAME
-              Write-Host "Ancien conteneur supprimé"
           } else {
-              Write-Host "Aucun conteneur existant trouvé"
+              Write-Host "Aucun ancien conteneur trouvé"
           }
-          
-          # Run new container
+
+          # Démarrer nouveau conteneur
           Write-Host "Démarrage du nouveau conteneur..."
-          $RESULT = docker run -d `
+
+          docker run -d `
             --name $CONTAINER_NAME `
             --restart unless-stopped `
             -p 5000:5000 `
             -e SECRET_KEY="${{ secrets.APP_SECRET_KEY }}" `
             -e FLASK_ENV=production `
-            $FULL_IMAGE 2>&1
-          
+            $FULL_IMAGE
+
           if ($LASTEXITCODE -ne 0) {
-              Write-Host "❌ Erreur lors du démarrage du conteneur:"
-              Write-Host $RESULT
+              Write-Host "❌ Erreur lors du démarrage"
+              docker logs $CONTAINER_NAME
               exit 1
           }
-          
-          # Check if container is running
+
           Start-Sleep -Seconds 5
+
           $RUNNING = docker ps --filter "name=$CONTAINER_NAME" --filter "status=running" --format "{{.Names}}"
-          
+
           if ($RUNNING -eq $CONTAINER_NAME) {
               Write-Host "✅ Conteneur démarré avec succès"
               Write-Host "Application disponible sur http://localhost:5000"
-              
-              # Afficher les logs du conteneur
-              Write-Host "Logs du conteneur :"
               docker logs $CONTAINER_NAME
           } else {
-              Write-Host "❌ Échec du démarrage du conteneur"
-              Write-Host "Statut du conteneur:"
+              Write-Host "❌ Échec du démarrage"
               docker ps -a --filter "name=$CONTAINER_NAME"
-              Write-Host "Logs:"
               docker logs $CONTAINER_NAME
               exit 1
           }
-        shell: powershell
+
+          Write-Host "===== DEPLOYMENT END ====="
