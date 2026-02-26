@@ -47,32 +47,52 @@ jobs:
           # Pull latest image
           docker pull $FULL_IMAGE
           
-          # Stop and remove old container (ignore errors if container doesn't exist)
-          Write-Host "Arrêt de l'ancien conteneur (si existant)..."
-          docker stop $CONTAINER_NAME 2>$null
-          docker rm $CONTAINER_NAME 2>$null
+          # Vérifier si le conteneur existe et le supprimer proprement
+          Write-Host "Nettoyage de l'ancien conteneur..."
+          $EXISTING_CONTAINER = docker ps -a --filter "name=$CONTAINER_NAME" --format "{{.Names}}"
+          
+          if ($EXISTING_CONTAINER -eq $CONTAINER_NAME) {
+              Write-Host "Conteneur existant trouvé, arrêt et suppression..."
+              docker stop $CONTAINER_NAME
+              docker rm $CONTAINER_NAME
+              Write-Host "Ancien conteneur supprimé"
+          } else {
+              Write-Host "Aucun conteneur existant trouvé"
+          }
           
           # Run new container
           Write-Host "Démarrage du nouveau conteneur..."
-          docker run -d `
+          $RESULT = docker run -d `
             --name $CONTAINER_NAME `
             --restart unless-stopped `
             -p 5000:5000 `
             -e SECRET_KEY="${{ secrets.APP_SECRET_KEY }}" `
             -e FLASK_ENV=production `
-            $FULL_IMAGE
+            $FULL_IMAGE 2>&1
+          
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "❌ Erreur lors du démarrage du conteneur:"
+              Write-Host $RESULT
+              exit 1
+          }
           
           # Check if container is running
           Start-Sleep -Seconds 5
-          if (docker ps | Select-String $CONTAINER_NAME) {
-            Write-Host "✅ Conteneur démarré avec succès"
-            Write-Host "Application disponible sur http://localhost:5000"
-            
-            # Afficher les logs du conteneur
-            Write-Host "Logs du conteneur :"
-            docker logs $CONTAINER_NAME
+          $RUNNING = docker ps --filter "name=$CONTAINER_NAME" --filter "status=running" --format "{{.Names}}"
+          
+          if ($RUNNING -eq $CONTAINER_NAME) {
+              Write-Host "✅ Conteneur démarré avec succès"
+              Write-Host "Application disponible sur http://localhost:5000"
+              
+              # Afficher les logs du conteneur
+              Write-Host "Logs du conteneur :"
+              docker logs $CONTAINER_NAME
           } else {
-            Write-Host "❌ Échec du démarrage du conteneur"
-            exit 1
+              Write-Host "❌ Échec du démarrage du conteneur"
+              Write-Host "Statut du conteneur:"
+              docker ps -a --filter "name=$CONTAINER_NAME"
+              Write-Host "Logs:"
+              docker logs $CONTAINER_NAME
+              exit 1
           }
         shell: powershell
